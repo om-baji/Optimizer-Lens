@@ -53,7 +53,10 @@ export function InteractivePlayground() {
   const [showCode, setShowCode] = useState(false)
 
   // Animation state
-  const animationRef = useRef<number>()
+  const isRunningRef = useRef(isRunning)
+  const animationRef = useRef<number | null>(null)
+  const currentPointRef = useRef<Point>(currentPoint)
+  const iterationRef = useRef<number>(iteration)
   const velocityRef = useRef<Point>({ x: 0, y: 0 })
   const momentumRef = useRef<Point>({ x: 0, y: 0 })
   const adamMRef = useRef<Point>({ x: 0, y: 0 })
@@ -68,11 +71,28 @@ export function InteractivePlayground() {
     drawVisualization()
   }, [currentPoint, path, selectedFunction])
 
+  useEffect(() => {
+    isRunningRef.current = isRunning
+  }, [isRunning])
+
+  // Keep refs for currentPoint and iteration in sync so the rAF loop
+  // reads the latest values instead of stale closures.
+  useEffect(() => {
+    currentPointRef.current = currentPoint
+  }, [currentPoint])
+
+  useEffect(() => {
+    iterationRef.current = iteration
+  }, [iteration])
+
   const reset = () => {
     setIsRunning(false)
+    isRunningRef.current = false
     setCurrentPoint({ x: 2, y: 2 })
+    currentPointRef.current = { x: 2, y: 2 }
     setPath([{ x: 2, y: 2 }])
     setIteration(0)
+    iterationRef.current = 0
     velocityRef.current = { x: 0, y: 0 }
     momentumRef.current = { x: 0, y: 0 }
     adamMRef.current = { x: 0, y: 0 }
@@ -93,8 +113,11 @@ export function InteractivePlayground() {
   }
 
   const optimizationStep = () => {
-    const grad = computeGradient(currentPoint.x, currentPoint.y, selectedFunction)
-    const newPoint = { ...currentPoint }
+    // Read latest values from refs to avoid stale closure issues when
+    // this function is invoked from the rAF callback.
+    const cp = currentPointRef.current
+    const grad = computeGradient(cp.x, cp.y, selectedFunction)
+    const newPoint = { ...cp }
 
     switch (selectedOptimizer) {
       case "gd":
@@ -121,7 +144,7 @@ export function InteractivePlayground() {
         const beta1 = config.beta1 || 0.9
         const beta2 = config.beta2 || 0.999
         const eps = config.epsilon || 1e-8
-        const t = iteration + 1
+        const t = iterationRef.current + 1
 
         adamMRef.current.x = beta1 * adamMRef.current.x + (1 - beta1) * grad.x
         adamMRef.current.y = beta1 * adamMRef.current.y + (1 - beta1) * grad.y
@@ -139,6 +162,11 @@ export function InteractivePlayground() {
         break
     }
 
+    // Update refs first so subsequent rAF calls see the latest values.
+    currentPointRef.current = newPoint
+    iterationRef.current = iterationRef.current + 1
+
+    // Update React state so UI reflects the changes
     setCurrentPoint(newPoint)
     setPath((prev) => [...prev.slice(-100), newPoint]) // Keep last 100 points
     setIteration((prev) => prev + 1)
@@ -146,8 +174,9 @@ export function InteractivePlayground() {
   }
 
   const animate = () => {
-    if (isRunning) {
+    if (isRunningRef.current) {
       optimizationStep()
+      console.log("Next Step..")
       animationRef.current = requestAnimationFrame(animate)
     }
   }
@@ -160,6 +189,7 @@ export function InteractivePlayground() {
       }
     } else {
       setIsRunning(true)
+      console.log("Setting Running true");
       animationRef.current = requestAnimationFrame(animate)
     }
   }
