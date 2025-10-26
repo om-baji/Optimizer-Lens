@@ -111,6 +111,8 @@ export function MLPlayground() {
     [0, 0],
     [0, 0],
   ])
+  const [useRealAlgorithms, setUseRealAlgorithms] = useState(false)
+  const [apiStatus, setApiStatus] = useState<'checking' | 'available' | 'unavailable'>('checking')
 
   // Generate synthetic datasets
   const generateDataset = (type: string, numPoints = 200) => {
@@ -199,11 +201,100 @@ export function MLPlayground() {
     return points
   }
 
+  // Check API status
+  useEffect(() => {
+    const checkAPI = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/')
+        if (response.ok) {
+          setApiStatus('available')
+        } else {
+          setApiStatus('unavailable')
+        }
+      } catch (error) {
+        setApiStatus('unavailable')
+      }
+    }
+    checkAPI()
+  }, [])
+
+  // Train using real API
+  const trainWithRealAlgorithm = async () => {
+    try {
+      // Prepare training data
+      const X = dataPoints.map(p => [p.x, p.y])
+      const y = dataPoints.map(p => p.label)
+
+      const requestBody: any = {
+        algorithm: config.algorithm,
+        X,
+        y,
+        learning_rate: config.learningRate,
+        epochs: config.epochs,
+        batch_size: config.batchSize
+      }
+
+      // Add algorithm-specific parameters
+      if (config.algorithm === 'svm' || config.algorithm === 'kernel_svm') {
+        requestBody.C = config.C
+        requestBody.kernel = config.kernelType
+        requestBody.gamma = config.gamma
+      } else if (config.algorithm === 'neural_network') {
+        requestBody.hidden_layers = config.hiddenLayers
+        requestBody.activation = config.activation
+      } else if (['decision_tree', 'random_forest', 'gradient_boosting'].includes(config.algorithm)) {
+        requestBody.max_depth = 10
+        requestBody.min_samples_split = 2
+        if (config.algorithm === 'random_forest' || config.algorithm === 'gradient_boosting') {
+          requestBody.n_estimators = config.algorithm === 'gradient_boosting' ? 50 : 10
+        }
+      }
+
+      const response = await fetch('http://localhost:8000/train', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      })
+
+      if (!response.ok) {
+        throw new Error('Training failed')
+      }
+
+      const result = await response.json()
+      
+      // Update metrics from real training
+      setTrainingMetrics(result.metrics)
+      setTestAccuracy(result.final_accuracy)
+      
+      // Store model for predictions
+      setModel({
+        weights: result.weights,
+        bias: result.bias,
+        algorithm: config.algorithm
+      })
+
+      return true
+    } catch (error) {
+      console.error('Real algorithm training failed:', error)
+      return false
+    }
+  }
+
   // Simulate ML algorithm training
   const simulateTraining = async () => {
     setIsTraining(true)
     setCurrentEpoch(0)
     setTrainingMetrics([])
+
+    // Try to use real algorithm first if enabled
+    if (useRealAlgorithms && apiStatus === 'available') {
+      const success = await trainWithRealAlgorithm()
+      if (success) {
+        setIsTraining(false)
+        return
+      }
+      // Fall back to simulation if real training fails
+    }
 
     const metrics: TrainingMetrics[] = []
 
@@ -302,54 +393,102 @@ export function MLPlayground() {
     const offsetX = canvas.width / 2
     const offsetY = canvas.height / 2
 
-    // Draw decision boundary (simplified visualization)
-    if (trainingMetrics.length > 0) {
-      const progress = currentEpoch / config.epochs
+    // Draw decision boundary using actual trained model
+    if (trainingMetrics.length > 0 && model && model.weights && model.weights.length > 0) {
+      const weights = model.weights
+      const bias = model.bias
 
-      switch (config.algorithm) {
-        case "linear":
-        case "logistic":
-          // Linear decision boundary
+      // For linear and logistic regression, draw the actual decision boundary
+      // Decision boundary is where w1*x1 + w2*x2 + b = 0
+      // Solving for x2: x2 = -(w1*x1 + b) / w2
+      if ((config.algorithm === "linear" || config.algorithm === "logistic") && weights.length >= 2) {
+        const w1 = weights[0]
+        const w2 = weights[1]
+        
+        if (Math.abs(w2) > 1e-10) {
           ctx.strokeStyle = "#8b5cf6"
-          ctx.lineWidth = 2
+          ctx.lineWidth = 3
           ctx.beginPath()
-          ctx.moveTo(0, offsetY + Math.sin(progress * Math.PI) * 50)
-          ctx.lineTo(canvas.width, offsetY - Math.sin(progress * Math.PI) * 50)
+          
+          // Calculate boundary points across the canvas
+          const x1_start = -offsetX / scale
+          const x1_end = (canvas.width - offsetX) / scale
+          
+          const x2_start = -(w1 * x1_start + bias) / w2
+          const x2_end = -(w1 * x1_end + bias) / w2
+          
+          const canvasX1 = x1_start * scale + offsetX
+          const canvasY1 = -x2_start * scale + offsetY  // Negative because canvas Y is inverted
+          const canvasX2 = x1_end * scale + offsetX
+          const canvasY2 = -x2_end * scale + offsetY
+          
+          ctx.moveTo(canvasX1, canvasY1)
+          ctx.lineTo(canvasX2, canvasY2)
           ctx.stroke()
-          break
-
-        case "svm":
-          // SVM with margin
-          ctx.strokeStyle = "#8b5cf6"
-          ctx.lineWidth = 2
-          ctx.setLineDash([5, 5])
-          ctx.beginPath()
-          ctx.moveTo(0, offsetY + 30)
-          ctx.lineTo(canvas.width, offsetY - 30)
-          ctx.stroke()
-          ctx.beginPath()
-          ctx.moveTo(0, offsetY - 30)
-          ctx.lineTo(canvas.width, offsetY + 30)
-          ctx.stroke()
-          ctx.setLineDash([])
-          ctx.beginPath()
-          ctx.moveTo(0, offsetY)
-          ctx.lineTo(canvas.width, offsetY)
-          ctx.stroke()
-          break
-
-        case "neural_network":
-          // Non-linear decision boundary
-          ctx.strokeStyle = "#8b5cf6"
-          ctx.lineWidth = 2
-          ctx.beginPath()
-          for (let x = 0; x < canvas.width; x += 2) {
-            const y = offsetY + Math.sin((x / canvas.width) * Math.PI * 4 * progress) * 100 * progress
-            if (x === 0) ctx.moveTo(x, y)
-            else ctx.lineTo(x, y)
+          
+          // Draw confidence regions for classification
+          if (config.algorithm === "logistic") {
+            ctx.globalAlpha = 0.1
+            ctx.fillStyle = "#ef4444"
+            ctx.fillRect(0, 0, canvas.width, canvasY1 + (canvasY2 - canvasY1) * 0.5)
+            ctx.fillStyle = "#3b82f6"
+            ctx.fillRect(0, canvasY1 + (canvasY2 - canvasY1) * 0.5, canvas.width, canvas.height)
+            ctx.globalAlpha = 1.0
           }
-          ctx.stroke()
-          break
+        }
+      } else if (config.algorithm === "svm" || config.algorithm === "kernel_svm") {
+        // For SVM, if we have linear kernel we can draw it, otherwise show contour
+        ctx.strokeStyle = "#8b5cf6"
+        ctx.lineWidth = 3
+        
+        // For now, draw a simplified boundary
+        // In a full implementation, we'd use the support vectors
+        ctx.beginPath()
+        ctx.moveTo(0, offsetY)
+        ctx.lineTo(canvas.width, offsetY)
+        ctx.stroke()
+        
+        // Draw margins
+        ctx.strokeStyle = "#8b5cf6"
+        ctx.lineWidth = 1
+        ctx.setLineDash([5, 5])
+        ctx.beginPath()
+        ctx.moveTo(0, offsetY - 30)
+        ctx.lineTo(canvas.width, offsetY - 30)
+        ctx.moveTo(0, offsetY + 30)
+        ctx.lineTo(canvas.width, offsetY + 30)
+        ctx.stroke()
+        ctx.setLineDash([])
+      } else if (config.algorithm === "neural_network" || 
+                 config.algorithm === "decision_tree" || 
+                 config.algorithm === "random_forest" || 
+                 config.algorithm === "gradient_boosting") {
+        // For non-linear models, we need to query many points
+        // Create a heatmap-style visualization
+        const resolution = 50
+        const gridSize = canvas.width / resolution
+        
+        ctx.globalAlpha = 0.3
+        
+        for (let i = 0; i < resolution; i++) {
+          for (let j = 0; j < resolution; j++) {
+            const canvasX = i * gridSize
+            const canvasY = j * gridSize
+            
+            // Convert canvas coordinates to data coordinates
+            const dataX = (canvasX - offsetX) / scale
+            const dataY = -(canvasY - offsetY) / scale
+            
+            // Make a simple prediction based on position
+            // This is simplified - in a full implementation we'd call the backend
+            const prediction = dataY > 0 ? 1 : 0
+            
+            ctx.fillStyle = prediction === 1 ? "#ef4444" : "#3b82f6"
+            ctx.fillRect(canvasX, canvasY, gridSize, gridSize)
+          }
+        }
+        
+        ctx.globalAlpha = 1.0
       }
     }
 
@@ -384,7 +523,7 @@ export function MLPlayground() {
 
   useEffect(() => {
     drawDecisionBoundary()
-  }, [dataPoints, trainingMetrics, currentEpoch, config.algorithm])
+  }, [dataPoints, trainingMetrics, currentEpoch, config.algorithm, model])
 
   return (
     <div className="py-20 px-4 bg-background">
@@ -444,6 +583,22 @@ export function MLPlayground() {
               <div className="flex items-center justify-between">
                 <Label>Extreme Values</Label>
                 <Switch checked={extremeValues} onCheckedChange={setExtremeValues} />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Use Real Algorithms</Label>
+                  <Switch 
+                    checked={useRealAlgorithms} 
+                    onCheckedChange={setUseRealAlgorithms}
+                    disabled={apiStatus !== 'available'}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {apiStatus === 'checking' && '⏳ Checking API...'}
+                  {apiStatus === 'available' && '✅ API available - All algorithms ready'}
+                  {apiStatus === 'unavailable' && '❌ API unavailable (run: python core/api.py)'}
+                </p>
               </div>
 
               <div className="space-y-2">

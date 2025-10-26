@@ -41,7 +41,7 @@ class LinearRegression:
         for _ in range(self.iterations):
             
             y_pred = self._compute_prediction(X)
-            dw, db = self._compute_gradient(X,y_pred,y)
+            dw, db = self._compute_gradient(X, y, y_pred)
             self._update_params(dw,db)
             
     def fit_sgd(self,X,y):
@@ -55,7 +55,7 @@ class LinearRegression:
             indices = np.arange(n_samples)
             np.random.shuffle(indices)
             
-            for i in range(indices):
+            for i in indices:
                 xi = X[i]
                 yi = y[i]
                 dw, db = self._compute_stochastic_gradient(xi,yi)
