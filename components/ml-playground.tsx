@@ -113,6 +113,7 @@ export function MLPlayground() {
   ])
   const [useRealAlgorithms, setUseRealAlgorithms] = useState(false)
   const [apiStatus, setApiStatus] = useState<'checking' | 'available' | 'unavailable'>('checking')
+  const SERVERURL = process.env.NEXT_PUBLIC_SERVER_URL; 
 
   // Generate synthetic datasets
   const generateDataset = (type: string, numPoints = 200) => {
@@ -205,7 +206,7 @@ export function MLPlayground() {
   useEffect(() => {
     const checkAPI = async () => {
       try {
-        const response = await fetch('http://localhost:8000/')
+        const response = await fetch(`${SERVERURL}`)
         if (response.ok) {
           setApiStatus('available')
         } else {
@@ -250,7 +251,7 @@ export function MLPlayground() {
         }
       }
 
-      const response = await fetch('http://localhost:8000/train', {
+      const response = await fetch(`${SERVERURL}/train`, { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody)
